@@ -1,0 +1,19 @@
+# TGMonitor Python Dependencies
+
+# Telegram MTProto 客户端
+telethon>=1.36.0
+
+# 异步 MySQL 驱动
+aiomysql>=0.2.0
+
+# 异步 Redis 驱动
+redis>=5.0.0
+
+# 配置管理
+python-dotenv>=1.0.0
+
+# 日志系统
+loguru>=0.7.0
+
+# 数据校验
+pydantic>=2.0.0
