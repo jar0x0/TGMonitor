@@ -191,7 +191,7 @@ python3 scripts/list_chats.py
   -1003858100250       channel        800    加密貨幣生活消費|TGMonitor
 
 ================================================================================
-📋 可直接复制到 .env 的配置行:
+📋 可直接复制到 .env 的配置行（不含账号手机号，如需指定账号请手动追加 :+手机号）:
 TG_MONITOR_CHATS=-5026789353:Testing:group,-529631173:Dapp-Learning:supergroup,-757106573:Follo One:supergroup,-1003858100250:加密貨幣生活消費|TGMonitor:channel
 ================================================================================
 ```
@@ -201,45 +201,92 @@ TG_MONITOR_CHATS=-5026789353:Testing:group,-529631173:Dapp-Learning:supergroup,-
 将需要监听的群组添加到 `.env` 的 `TG_MONITOR_CHATS` 中：
 
 ```bash
-# 格式: chat_id:群名:类型
+# 格式: chat_id:群名:类型[:账号手机号]
 # 多个群组用逗号分隔
 # 类型: group / supergroup / channel（省略默认为 supergroup）
-TG_MONITOR_CHATS=-5026789353:Testing:group,-529631173:Dapp-Learning:supergroup
+# 账号手机号: 可选，指定由哪个账号监听该群，不填则默认第一个账号
+TG_MONITOR_CHATS=-5026789353:Testing:group:+13239025485,-1002469684134:Infini Community:supergroup:+14315091228
 ```
 
 格式规则：
 
-| 部分 | 说明 | 示例 |
-|------|------|------|
-| `chat_id` | 群组 ID，由 `list_chats.py` 获取，通常为负数 | `-5026789353` |
-| `chat_title` | 群名，仅用于显示，不影响匹配 | `Testing` |
-| `chat_type` | 类型，可选值：`group`、`supergroup`、`channel` | `group` |
+| 部分 | 必填 | 说明 | 示例 |
+|------|:----:|------|------|
+| `chat_id` | 是 | 群组 ID，由 `list_chats.py` 获取，通常为负数 | `-5026789353` |
+| `chat_title` | 是 | 群名，仅用于显示，不影响匹配 | `Testing` |
+| `chat_type` | 否 | 类型：`group`、`supergroup`、`channel`，默认 `supergroup` | `group` |
+| `assigned_phone` | 否 | 分配的监听账号手机号，不填则默认第一个账号 | `+14315091228` |
 
 **启动或重启服务后生效**。系统每 5 分钟会自动刷新群组列表。
 
 ### 2.3 动态增减群组
 
+推荐使用管理脚本操作，**无需修改 `.env`、无需重启服务**：
+
+```bash
+cd TGMonitor/src
+python3 scripts/manage_chats.py
+```
+
+脚本提供交互式菜单：
+
+```
+==================================================
+  TGMonitor — 监控群组管理
+==================================================
+  [1] 查看当前监控群组
+  [2] 添加新群组
+  [3] 禁用群组（停止监听）
+  [4] 启用群组（恢复监听）
+  [5] 删除群组（物理删除）
+  [0] 退出
+```
+
 **添加新群组：**
 
-1. 用监听账号手动加入那个群组
-2. 运行 `python3 scripts/list_chats.py` 找到新群组的 `chat_id`
-3. 在 `.env` 的 `TG_MONITOR_CHATS` 后面追加 `,chat_id:群名:类型`
-4. 重启服务：`pm2 restart tg-monitor`
+选择 `[2]`，脚本会连接 Telegram 列出该账号已加入但尚未监控的群组，选择后直接写入 MySQL 并清除 Redis 缓存。运行中的服务会在下一刷新周期（≤5 分钟）自动开始监听。
 
-**停止监听某个群组：**
+**禁用群组（保留记录，随时恢复）：**
 
-在 `.env` 的 `TG_MONITOR_CHATS` 中删掉对应群组段，然后重启服务。
+选择 `[3]`，从启用中的群组里选一个禁用。
 
-**也可以在数据库中操作**（无需修改 .env）：
+**启用群组（恢复监听）：**
+
+选择 `[4]`，从已禁用的群组里选一个重新启用。
+
+**删除群组（物理删除记录）：**
+
+选择 `[5]`，彻底删除群组配置。
+
+> 💡 所有操作都直接写入 MySQL 并清除 Redis 缓存，**无需重启服务**，≤5 分钟自动生效。
+
+**也可以直接在数据库中操作**（同样无需重启）：
 
 ```sql
--- 启用/禁用群组（不需要重启，5 分钟内自动生效）
+-- 添加新群组
+INSERT INTO tgm_monitored_chat (chat_id, chat_title, chat_type, assigned_account_phone, is_active)
+VALUES (-123456789, '群名', 'supergroup', '+13239025485', 1);
+
+-- 禁用群组
 UPDATE tgm_monitored_chat SET is_active = 0 WHERE chat_id = -5026789353;
+
+-- 启用群组
 UPDATE tgm_monitored_chat SET is_active = 1 WHERE chat_id = -5026789353;
 
 -- 查看所有已配置的群组
 SELECT id, chat_id, chat_title, chat_type, is_active, assigned_account_phone
 FROM tgm_monitored_chat ORDER BY id;
+```
+
+直接操作数据库后同样 ≤5 分钟自动生效。如需立即生效可手动清除 Redis 缓存：
+
+```bash
+python3 -c "
+import redis
+r = redis.Redis(host='localhost', port=6379, db=1, decode_responses=True)
+r.delete('monitor:chat:active_ids')
+print('Done')
+"
 ```
 
 ---
@@ -674,6 +721,39 @@ else:
 "
 ```
 
+**Q: 运行脚本时报 `database is locked` 错误？**
+
+这是 SQLite session 文件被占用导致的。常见原因及解决方法：
+
+| 场景 | 原因 | 解决方法 |
+|------|------|---------|
+| 运行 `main.py` 报 locked | 有另一个 TGMonitor 进程正在运行（包括 PM2 托管的） | 先停止旧进程：`pm2 stop tg-monitor` 或 `kill <PID>` |
+| 运行 `manage_chats.py` / `list_chats.py` 报 locked | 正常，不应出现 | 脚本已内置临时 session 副本机制，自动避开锁冲突。如仍报错，确认脚本是最新版本 |
+| 多次启动 `main.py` | 前一个进程未完全退出 | 查找并终止残留进程：`lsof sessions/account_*.session` 找到 PID 后 `kill <PID>` |
+
+> 💡 `manage_chats.py` 和 `list_chats.py` 在连接 Telegram 时会自动将 session 文件复制到临时目录，避免与正在运行的主服务冲突。
+
+**Q: 服务异常退出，日志报 "Event loop is closed" 或 "Task was destroyed but it is pending"？**
+
+这些是进程关闭时的异步任务清理问题，通常不影响数据完整性。系统已内置优雅关闭机制：
+
+1. 收到 SIGINT/SIGTERM 信号后，会按顺序断开所有 Telegram 客户端、关闭数据库连接池、关闭 Redis 连接
+2. 如果仍出现此类日志，说明有后台任务在关闭窗口期内未及时完成，属于正常现象
+3. 直接重启即可：`pm2 restart tg-monitor`
+
+**Q: 群组分配了错误的监听账号？**
+
+如果某个群组被错误地分配给了另一个账号，修正方法：
+
+1. 在 `.env` 中更新 `TG_MONITOR_CHATS`，为对应群组指定正确的 `:+手机号`
+2. 在数据库中修正：
+   ```sql
+   UPDATE tgm_monitored_chat
+   SET assigned_account_phone = '+正确的手机号'
+   WHERE chat_id = -目标群组ID;
+   ```
+3. 清除 Redis 缓存后重启或等待 ≤5 分钟自动刷新
+
 ---
 
 ## 第七部分：系统维护
@@ -691,8 +771,12 @@ FROM tgm_account;"
 
 # 查看监控群组
 mysql -u hello -p123456 hello -e "
-SELECT chat_id, chat_title, chat_type, is_active
+SELECT chat_id, chat_title, chat_type, assigned_account_phone, is_active
 FROM tgm_monitored_chat;"
+
+# 交互式管理监控群组（添加/禁用/启用/删除）
+cd TGMonitor/src
+python3 scripts/manage_chats.py
 
 # 运行部署检查
 cd TGMonitor

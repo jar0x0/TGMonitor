@@ -237,7 +237,7 @@ pm2 save
 
 | match_type | 说明 | 示例 |
 |-----------|------|------|
-| `exact` | 精确匹配（大小写不敏感，词边界） | `TGMonitor` 匹配 "I like TGMonitor" |
+| `exact` | 精确匹配（大小写不敏感，词边界） | `relinx` 匹配 "I like relinx" |
 | `regex` | 正则表达式 | `re[-_]?linx` 匹配 "re-linx" |
 | `fuzzy` | 包含匹配（大小写不敏感） | `gift card` 匹配 "cheap Gift Cards" |
 
@@ -390,4 +390,4 @@ LIMIT 50;
 
 ## 许可
 
-内部项目，仅限 TGMonitor 团队使用。
+内部项目，仅限 relinx 团队使用。
